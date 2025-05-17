@@ -15,3 +15,6 @@ python -m django --version
 python manage.py test [app_name]
 
 for example: python manage.py test users
+
+### To run
+python manage.py runserver
