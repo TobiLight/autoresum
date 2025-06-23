@@ -5,22 +5,18 @@
 from django.urls import path
 
 from .views import (
-    CoverLetterCreateView,
+    # CoverLetterCreateView,  # DEPRECATED: Functionality moved to ViewGeneratedCoverLetterContentView
     CoverLetterResultView,
     CoverLetterUpdateView,
     GenerateAICoverLetterContentView,
     UpdateGenerateAICoverLetterContentView,
     UpdatedGeneratedAICoverLetterContentView,
-    UpdateAICoverLetterView,
+    # UpdateAICoverLetterView,  # DEPRECATED: Functionality moved to UpdatedGeneratedAICoverLetterContentView
     ViewGeneratedCoverLetterContentView,
 )
 
 urlpatterns = [
-    path(
-        "create",
-        CoverLetterCreateView.as_view(),
-        name="create_cover_letter",
-    ),
+    # Core 2-endpoint flow for cover letter generation
     path(
         "generate",
         GenerateAICoverLetterContentView.as_view(),
@@ -31,6 +27,8 @@ urlpatterns = [
         ViewGeneratedCoverLetterContentView.as_view(),
         name="view_generated_cover_letter_content",
     ),
+
+    # Cover letter update flow (2-endpoint pattern)
     path(
         "generate/update/<str:cover_letter_id>",
         UpdateGenerateAICoverLetterContentView.as_view(),
@@ -41,7 +39,8 @@ urlpatterns = [
         UpdatedGeneratedAICoverLetterContentView.as_view(),
         name="update_generated_cover_letter_content",
     ),
-    path("update/generated/<str:cover_letter_task_id>", UpdateAICoverLetterView.as_view(), name="update_cover_letter_ai"),
+
+    # Cover letter management endpoints
     path(
         "update/<int:cover_letter_id>",
         CoverLetterUpdateView.as_view(),
@@ -52,4 +51,12 @@ urlpatterns = [
         CoverLetterResultView.as_view(),
         name="view_cover_letter",
     ),
+
+    # DEPRECATED ENDPOINTS - Functionality moved to enhanced views above
+    # path(
+    #     "create",
+    #     CoverLetterCreateView.as_view(),
+    #     name="create_cover_letter",
+    # ),  # Use "generated/<id>" instead
+    # path("update/generated/<str:cover_letter_task_id>", UpdateAICoverLetterView.as_view(), name="update_cover_letter_ai"),  # Use "generated/update/<id>" instead
 ]

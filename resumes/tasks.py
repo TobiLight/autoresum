@@ -56,4 +56,8 @@ def update_resume_content_task(resume_id: str, user_data: dict, user_id: int):
     resume.update_generate_content_count += 1
     resume.save(update_fields=["update_generate_content_count"])
 
-    return {"original_content": resume_content, "parsed_content": parsed_data}
+    return {
+        "original_content": resume_content,
+        "parsed_content": parsed_data,
+        "resume_id": resume_id  # Include resume_id for automatic update functionality
+    }

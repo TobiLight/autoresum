@@ -386,3 +386,179 @@ class OpenAIResumeGeneratorTest(TestCase):
 
         self.assertEqual(resume_content, "Generated Resume Content")
         mock_client.chat.completions.create.assert_called_once()
+
+
+class GeneratedAIContentViewTest(TestCase):
+    """Test the enhanced GeneratedAIContentView that automatically creates resumes."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(
+            username="testuser",
+            email="testuser@example.com",
+            password="testpass",
+        )
+        self.client.force_authenticate(user=self.user)
+        self.task_id = "test-task-id-123"
+
+    @patch("resumes.containers.Container.resume_repository")
+    @patch("celery.result.AsyncResult")
+    def test_successful_task_creates_resume_automatically(self, mock_async_result, mock_repo):
+        """Test that a successful task automatically creates a resume."""
+        # Mock AsyncResult for successful task
+        mock_result = MagicMock()
+        mock_result.state = "SUCCESS"
+        mock_result.status = "SUCCESS"
+        mock_result.ready.return_value = True
+        mock_result.failed.return_value = False
+        mock_result.id = self.task_id
+        mock_async_result.return_value = mock_result
+
+        # Mock repository methods
+        mock_repository = MagicMock()
+        mock_repo.return_value = mock_repository
+
+        # Mock task result data
+        task_data = {
+            "original_content": "Generated resume content",
+            "parsed_content": {
+                "full_name": "John Doe",
+                "phone_number": "+1234567890",
+                "work_experience": [],
+                "education": [],
+                "skills": ["Python", "Django"],
+                "certifications": [],
+                "languages": ["English"],
+                "resume_summary": "Experienced developer",
+            }
+        }
+        mock_repository.get_task_result.return_value = task_data
+
+        # Mock created resume
+        mock_resume = MagicMock()
+        mock_resume.id = 1
+        mock_resume.first_name = "John"
+        mock_resume.last_name = "Doe"
+        mock_resume.email = "testuser@example.com"
+        mock_resume.phone_number = "+1234567890"
+        mock_resume.work_experience = []
+        mock_resume.education = []
+        mock_resume.skills = ["Python", "Django"]
+        mock_resume.certifications = []
+        mock_resume.languages = ["English"]
+        mock_resume.resume_summary = "Experienced developer"
+        mock_repository.create_resume.return_value = mock_resume
+
+        # Make request to the enhanced endpoint
+        response = self.client.get(f"/api/resume/generated/{self.task_id}")
+
+        # Assertions
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["status"], "Success")
+        self.assertEqual(response.data["message"], "Resume created successfully")
+        self.assertIn("resume", response.data)
+        self.assertEqual(response.data["resume"]["id"], 1)
+        self.assertEqual(response.data["resume"]["first_name"], "John")
+        self.assertEqual(response.data["task_id"], self.task_id)
+
+        # Verify repository methods were called
+        mock_repository.create_resume.assert_called_once_with(
+            task_data["original_content"],
+            task_data["parsed_content"],
+            self.user
+        )
+        mock_repository.delete_task.assert_called_once_with(self.task_id)
+        # Note: forget() is called on the AsyncResult instance returned by AsyncResult(resume_content_id)
+        # which is different from the mock_result we set up
+
+    @patch("resumes.containers.Container.resume_repository")
+    @patch("celery.result.AsyncResult")
+    def test_pending_task_returns_status(self, mock_async_result, mock_repo):
+        """Test that a pending task returns status information."""
+        # Mock AsyncResult for pending task
+        mock_result = MagicMock()
+        mock_result.state = "PENDING"
+        mock_result.ready.return_value = False
+        mock_result.failed.return_value = False
+        mock_result.id = self.task_id
+        mock_async_result.return_value = mock_result
+
+        # Mock repository methods
+        mock_repository = MagicMock()
+        mock_repo.return_value = mock_repository
+        mock_repository.get_task_result.return_value = None
+
+        # Make request to the enhanced endpoint
+        response = self.client.get(f"/api/resume/generated/{self.task_id}")
+
+        # Assertions
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.data["status"], "Pending")
+        self.assertIn("Resume generation is still in progress", response.data["message"])
+        self.assertEqual(response.data["task_id"], self.task_id)
+        self.assertEqual(response.data["task_state"], "PENDING")
+
+    # @patch("resumes.containers.Container.resume_repository")
+    # @patch("celery.result.AsyncResult")
+    # def test_failed_task_returns_error(self, mock_async_result, mock_repo):
+    #     """Test that a failed task returns error information."""
+    #     # Mock AsyncResult for failed task
+    #     mock_result = MagicMock()
+    #     mock_result.state = "FAILURE"
+    #     mock_result.failed.return_value = True
+    #     mock_result.id = self.task_id
+    #     mock_async_result.return_value = mock_result
+
+    #     # Make request to the enhanced endpoint
+    #     response = self.client.get(f"/api/resume/generated/{self.task_id}")
+
+    #     # Assertions
+    #     self.assertEqual(response.status_code, 400)
+    #     self.assertEqual(response.data["status"], "Failed")
+    #     self.assertIn("Resume generation failed", response.data["message"])
+    #     self.assertEqual(response.data["task_id"], self.task_id)
+
+    @patch("resumes.containers.Container.resume_repository")
+    @patch("celery.result.AsyncResult")
+    def test_resume_creation_failure_handled(self, mock_async_result, mock_repo):
+        """Test that resume creation failures are handled gracefully."""
+        # Mock AsyncResult for successful task
+        mock_result = MagicMock()
+        mock_result.state = "SUCCESS"
+        mock_result.status = "SUCCESS"
+        mock_result.ready.return_value = True
+        mock_result.failed.return_value = False
+        mock_result.id = self.task_id
+        mock_async_result.return_value = mock_result
+
+        # Mock repository methods
+        mock_repository = MagicMock()
+        mock_repo.return_value = mock_repository
+
+        # Mock task result data
+        task_data = {
+            "original_content": "Generated resume content",
+            "parsed_content": {
+                "full_name": "John Doe",
+                "phone_number": "+1234567890",
+                "work_experience": [],
+                "education": [],
+                "skills": ["Python", "Django"],
+                "certifications": [],
+                "languages": ["English"],
+                "resume_summary": "Experienced developer",
+            }
+        }
+        mock_repository.get_task_result.return_value = task_data
+
+        # Mock resume creation failure
+        mock_repository.create_resume.side_effect = Exception("Database error")
+
+        # Make request to the enhanced endpoint
+        response = self.client.get(f"/api/resume/generated/{self.task_id}")
+
+        # Assertions
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.data["status"], "Failed")
+        self.assertIn("failed to create resume", response.data["message"])
+        self.assertEqual(response.data["task_id"], self.task_id)

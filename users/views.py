@@ -1,7 +1,7 @@
 import logging
 
-from rest_framework import status
-from rest_framework.generics import CreateAPIView
+from rest_framework import permissions, status
+from rest_framework.generics import CreateAPIView, RetrieveAPIView, UpdateAPIView
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import (
@@ -9,7 +9,13 @@ from rest_framework_simplejwt.views import (
     TokenObtainPairView,
 )
 
-from users.serializers import UserSerializer
+from users.models import User
+from users.serializers import (
+    UserSerializer,
+    UserProfileSerializer,
+    UserProfileUpdateSerializer,
+)
+from rest_framework.permissions import AllowAny
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +41,7 @@ class UserRegistrationView(CreateAPIView):
         Logs the registration process, including successful registrations
         and errors.
     """
-
+    permission_classes = [AllowAny]
     serializer_class = UserSerializer
 
     def create(self, request):
@@ -103,3 +109,93 @@ class UserLogoutView(TokenBlacklistView):
     """
 
     pass
+
+
+class UserProfileView(RetrieveAPIView, UpdateAPIView):
+    """
+    API view for user profile management (retrieve and update).
+
+    This endpoint allows authenticated users to view and update their complete profile information.
+    Users can only access and modify their own profile data for security.
+
+    URL:
+        - GET /api/auth/profile - Retrieve profile
+        - PATCH/PUT /api/auth/profile - Update profile
+
+    Authentication: Required (IsAuthenticated)
+
+    Updatable Fields: first_name, last_name, email
+
+    Responses:
+        - 200 OK: Profile retrieved/updated successfully
+        - 400 Bad Request: Validation errors (update only)
+        - 401 Unauthorized: User not authenticated
+
+    Security: Users can only view/update their own profile data
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_object(self):
+        """Return the current authenticated user."""
+        return self.request.user
+
+    def get_serializer_class(self):
+        """Return appropriate serializer based on request method."""
+        if self.request.method in ['PATCH', 'PUT']:
+            return UserProfileUpdateSerializer
+        return UserProfileSerializer
+
+    def retrieve(self, request, *args, **kwargs):
+        """Retrieve user profile with custom response format."""
+        instance = self.get_object()
+        serializer = self.get_serializer(instance)
+
+        logger.info(f"User profile retrieved for user: {instance.username}")
+
+        return Response(
+            {
+                "status": "Success",
+                "message": "Profile retrieved successfully",
+                "user": serializer.data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    def update(self, request, *args, **kwargs):
+        """Update user profile with custom response format."""
+        partial = kwargs.pop('partial', False)
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+
+        if serializer.is_valid():
+            self.perform_update(serializer)
+
+            # Get updated user data using profile serializer
+            profile_serializer = UserProfileSerializer(instance)
+
+            logger.info(f"User profile updated for user: {instance.username}")
+
+            return Response(
+                {
+                    "status": "Success",
+                    "message": "Profile updated successfully",
+                    "user": profile_serializer.data,
+                },
+                status=status.HTTP_200_OK,
+            )
+        else:
+            logger.error(f"Profile update failed for user {instance.username}: {serializer.errors}")
+            return Response(
+                {
+                    "status": "Failed",
+                    "message": "Profile update failed",
+                    "errors": serializer.errors,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+    def partial_update(self, request, *args, **kwargs):
+        """Handle PATCH requests."""
+        kwargs['partial'] = True
+        return self.update(request, *args, **kwargs)

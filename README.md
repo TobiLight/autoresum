@@ -8,13 +8,10 @@
 
 ### To check Django version
 
-`python -m django --version`
+python -m django --version
 
 ### To run tests
 
 python manage.py test [app_name]
 
-for example: `python manage.py test users`
-
-### To run
-`python manage.py runserver`
+for example: python manage.py test users

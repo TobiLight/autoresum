@@ -13,6 +13,7 @@ https://docs.djangoproject.com/en/5.1/ref/settings/
 import os
 from datetime import timedelta
 from pathlib import Path
+import dj_database_url
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -31,16 +32,12 @@ if env_path.exists():
 # See https://docs.djangoproject.com/en/5.1/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = (
-    os.getenv("SECRET_KEY", "")
-)
+SECRET_KEY = os.getenv("SECRET_KEY", "")
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = [
-    "autoresum-api.onrender.com", "127.0.0.1"
-]
+ALLOWED_HOSTS = ["*"]
 
 
 # Application definition
@@ -58,7 +55,7 @@ INSTALLED_APPS = [
     "users",
     "resumes",
     "cover_letters",
-    "subscriptions"
+    "subscriptions",
 ]
 
 MIDDLEWARE = [
@@ -97,12 +94,31 @@ WSGI_APPLICATION = "autoresum_api.wsgi.application"
 # Database
 # https://docs.djangoproject.com/en/5.1/ref/settings/#databases
 
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
+if os.getenv("DATABASE_URL"):
+    DATABASES = {
+        # "default": {
+        #     "ENGINE": "django.db.backends.sqlite3",
+        #     "NAME": BASE_DIR / "db.sqlite3",
+        # }
+        "default": dj_database_url.config(
+            default=os.getenv(
+                "DATABASE_URL", "postgres://postgres:postgres@localhost:5432/postgres"
+            ),
+            conn_max_age=600,
+            conn_health_checks=True,
+        )
     }
-}
+else:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": os.getenv("POSTGRES_DB", default="autoresum_db"),
+            "USER": os.getenv("POSTGRES_USER", default="postgres"),
+            "PASSWORD": os.getenv("POSTGRES_PASSWORD", default="postgres"),
+            "HOST": os.getenv("POSTGRES_HOST", default="localhost"),
+            "PORT": os.getenv("POSTGRES_PORT", default="5432"),
+        }
+    }
 
 
 # Password validation
@@ -110,20 +126,16 @@ DATABASES = {
 
 AUTH_PASSWORD_VALIDATORS = [
     {
-        "NAME": "django.contrib.auth.password_validation."
-        "UserAttributeSimilarityValidator",
+        "NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator",
     },
     {
-        "NAME": "django.contrib.auth.password_validation."
-        "MinimumLengthValidator",
+        "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
     },
     {
-        "NAME": "django.contrib.auth.password_validation."
-        "CommonPasswordValidator",
+        "NAME": "django.contrib.auth.password_validation.CommonPasswordValidator",
     },
     {
-        "NAME": "django.contrib.auth.password_validation."
-        "NumericPasswordValidator",
+        "NAME": "django.contrib.auth.password_validation.NumericPasswordValidator",
     },
     {
         # Custom validator
@@ -147,6 +159,8 @@ REST_FRAMEWORK = {
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=60),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=1),
+    "ROTATE_REFRESH_TOKENS": True,
+    "BLACKLIST_AFTER_ROTATION": True,
 }
 
 # Internationalization
@@ -183,7 +197,7 @@ SWAGGER_SETTINGS = {
     "USE_SESSION_AUTH": False,  # Disable session authentication
 }
 
-
+# CELERY
 CELERY_BROKER_URL = "redis://localhost:6379/0"
 CELERY_RESULT_BACKEND = "redis://localhost:6379/0"
 CELERY_ACCEPT_CONTENT = ["json"]
@@ -193,10 +207,18 @@ CELERY_TASK_SERIALIZER = "json"
 # CELERY_TASK_TRACK_STARTED = True
 # CELERY_TASK_TIME_LIMIT = 30 * 60
 
-
+# OPEN AI
 AI_PROVIDER = "openai"
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_ORGANIZATION_ID = os.getenv("OPENAI_ORGANIZATION_ID")
+
+
+# Stripe API Keys
+STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY")
+STRIPE_PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY")
+STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET")  # For webhook verification
+STRIPE_PRO_MONTHLY_PRODUCT_ID = os.getenv("STRIPE_PRO_MONTHLY_PRODUCT_ID")
+STRIPE_PRO_YEARLY_PRODUCT_ID = os.getenv("STRIPE_PRO_YEARLY_PRODUCT_ID")
 
 
 # REDIS CACHE

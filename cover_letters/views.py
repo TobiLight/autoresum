@@ -4,15 +4,17 @@
 
 import json
 import logging
+
 from django.http import Http404
-from rest_framework.generics import CreateAPIView, UpdateAPIView
-from celery.exceptions import BackendError
-from celery.result import AsyncResult
 from rest_framework import permissions, status
-from rest_framework.generics import CreateAPIView
+from rest_framework.generics import CreateAPIView, UpdateAPIView
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
+
+from celery.exceptions import BackendError
+from celery.result import AsyncResult
+
 from cover_letters.containers import Container
 from cover_letters.models import CoverLetter
 from cover_letters.serializers import (
@@ -62,113 +64,210 @@ class GenerateAICoverLetterContentView(CreateAPIView):
 
 
 class ViewGeneratedCoverLetterContentView(APIView):
-    """API VIEW FOR AI-GENERATED CONTENT"""
+    """Enhanced endpoint that checks task status and automatically creates cover letter when ready"""
+
+    permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request, cover_letter_task_id):
-        """"""
+        """
+        Enhanced endpoint that:
+        1. Checks the status of the async task
+        2. If task is complete and successful, automatically creates the cover letter and returns it
+        3. If task is still pending/running, returns status information
+        4. If task failed, returns error information
+        """
         cover_letter_repo = Container.cover_letter_repository()
 
         try:
             cover_letter_content_result = AsyncResult(cover_letter_task_id)
 
+            # Handle failed tasks
             if (
                 cover_letter_content_result.state.lower() == "failure"
                 or cover_letter_content_result.failed()
             ):
-                return cover_letter_content_result.maybe_throw()
-
-            if cover_letter_content_result.ready():
-                cached_data = cover_letter_repo.get_task_result(
-                    cover_letter_content_result.id
+                logger.error(f"Task {cover_letter_task_id} failed")
+                return Response(
+                    {
+                        "status": "Failed",
+                        "message": "Cover letter generation failed. Please try again.",
+                        "task_id": cover_letter_task_id,
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
                 )
 
+            # Handle completed tasks
+            if cover_letter_content_result.ready():
+                cached_data = cover_letter_repo.get_task_result(cover_letter_content_result.id)
+
+                # If data is not cached but task is successful, cache it first
                 if (
                     cached_data is None
                     and cover_letter_content_result.status.lower() == "success"
                 ):
-
                     cover_letter_repo.save_task_result(
                         cover_letter_content_result.id,
                         cover_letter_content_result.result,
                     )
+                    cached_data = cover_letter_content_result.result
 
-                    logger.info("Cover letter content retrieved successfully")
-                    return Response(
-                        {
-                            "status": cover_letter_content_result.status,
-                            "task_id": cover_letter_content_result.task_id,
-                            **cover_letter_repo.get_task_result(
-                                cover_letter_task_id
-                            ),
-                        },
-                        status=status.HTTP_200_OK,
-                    )
+                # If we have the task data, automatically create the cover letter
+                if cached_data and cover_letter_content_result.status.lower() == "success":
+                    try:
+                        # Create the cover letter automatically
+                        cover_letter = cover_letter_repo.create_cover_letter(
+                            cached_data["original_content"],
+                            cached_data["parsed_content"],
+                            self.request.user,
+                        )
 
-                logger.info("Cover letter content retrieved successfully")
-                cover_letter_content_result.forget()
-                logger.info(
-                    "Cover letter content test result deleted successfully"
-                )
+                        # Clean up the cached data and task result
+                        cover_letter_repo.delete_task(cover_letter_task_id)
+                        cover_letter_content_result.forget()
 
+                        logger.info(f"Cover letter created successfully with ID: {cover_letter.id}")
+
+                        # Return the created cover letter data (same format as CoverLetterCreateView)
+                        return Response(
+                            {
+                                "status": "Success",
+                                "message": "Cover letter created successfully",
+                                "cover_letter": {
+                                    "id": cover_letter.id,
+                                    "name": cover_letter.name,
+                                    "email": cover_letter.email,
+                                    "phone_number": cover_letter.phone_number,
+                                    "company_name": cover_letter.company_name,
+                                    "job_title": cover_letter.job_title,
+                                    "cover_letter_content": cover_letter.cover_letter_content,
+                                    "generated_content": cover_letter.generated_content,
+                                },
+                                "task_id": cover_letter_task_id,
+                            },
+                            status=status.HTTP_201_CREATED,
+                        )
+                    except Exception as e:
+                        logger.error(f"Failed to create cover letter: {e}")
+                        return Response(
+                            {
+                                "status": "Failed",
+                                "message": "Cover letter generation completed but failed to create cover letter. Please try again.",
+                                "task_id": cover_letter_task_id,
+                            },
+                            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        )
+
+                # If task completed but no valid data
+                logger.error(f"Task {cover_letter_task_id} completed but no valid data found")
                 return Response(
                     {
-                        **cached_data,
+                        "status": "Failed",
+                        "message": "Cover letter generation completed but no valid data found. Please try again.",
+                        "task_id": cover_letter_task_id,
                     },
-                    status=status.HTTP_200_OK,
+                    status=status.HTTP_400_BAD_REQUEST,
                 )
 
-            cached_data = cover_letter_repo.get_task_result(
-                cover_letter_content_result.id
-            )
+            # Handle pending tasks
+            cached_data = cover_letter_repo.get_task_result(cover_letter_content_result.id)
 
             if cached_data:
-                logger.info("Cover letter content retrieved successfully")
-                return Response(
-                    {
-                        **cached_data,
-                    },
-                    status=status.HTTP_200_OK,
-                )
+                # Task is complete but AsyncResult might not reflect it yet
+                try:
+                    cover_letter = cover_letter_repo.create_cover_letter(
+                        cached_data["original_content"],
+                        cached_data["parsed_content"],
+                        self.request.user,
+                    )
 
-            logger.error("Content is pending or has been deleted")
+                    # Clean up the cached data
+                    cover_letter_repo.delete_task(cover_letter_task_id)
+                    cover_letter_content_result.forget()
 
+                    logger.info(f"Cover letter created successfully with ID: {cover_letter.id}")
+
+                    return Response(
+                        {
+                            "status": "Success",
+                            "message": "Cover letter created successfully",
+                            "cover_letter": {
+                                "id": cover_letter.id,
+                                "name": cover_letter.name,
+                                "email": cover_letter.email,
+                                "phone_number": cover_letter.phone_number,
+                                "company_name": cover_letter.company_name,
+                                "job_title": cover_letter.job_title,
+                                "cover_letter_content": cover_letter.cover_letter_content,
+                                "generated_content": cover_letter.generated_content,
+                            },
+                            "task_id": cover_letter_task_id,
+                        },
+                        status=status.HTTP_201_CREATED,
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to create cover letter from cached data: {e}")
+                    return Response(
+                        {
+                            "status": "Failed",
+                            "message": "Cover letter generation completed but failed to create cover letter. Please try again.",
+                            "task_id": cover_letter_task_id,
+                        },
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    )
+
+            # Task is still pending
+            logger.info(f"Task {cover_letter_task_id} is still pending")
             return Response(
-                {"status": "PENDING OR DELETED"},
+                {
+                    "status": "Pending",
+                    "message": "Cover letter generation is still in progress. Please check again in a few moments.",
+                    "task_id": cover_letter_task_id,
+                    "task_state": cover_letter_content_result.state,
+                },
                 status=status.HTTP_202_ACCEPTED,
             )
+
         except BackendError:  # Raised when result backend can't find the task
-            print(
+            logger.error(
                 f"Task result for {cover_letter_task_id} has been deleted or doesn't exist."
             )
-        except KeyError:  # Raised if task metadata is missing in Redis
-            logger.error(f"Task {cover_letter_task_id} not found in the backend.")
-            logger.info(
-                f"Task result for {cover_letter_content_id} has been deleted"
-                f" or doesn't exist."
-            )
-        except KeyError:  # Raised if task metadata is missing in Redis
-            logger.error(
-                f"Task {cover_letter_content_id} not found in the backend."
-            )
-            cover_letter_content_result.forget()
             return Response(
                 {
                     "status": "Failed",
-                    "message": "Please generate content again.",
+                    "message": "Task not found. Please generate content again.",
+                    "task_id": cover_letter_task_id,
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        except KeyError:  # Raised if task metadata is missing in Redis
+            logger.error(f"Task {cover_letter_task_id} not found in the backend.")
+            try:
+                cover_letter_content_result.forget()
+            except:
+                pass
+            return Response(
+                {
+                    "status": "Failed",
+                    "message": "Task metadata missing. Please generate content again.",
+                    "task_id": cover_letter_task_id,
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
         except Exception as e:  # Catch any unexpected errors
-            logger.error(f"An error occurred: {e}")
-            AsyncResult(cover_letter_task_id).revoke()
-            AsyncResult(cover_letter_task_id).forget()
+            logger.error(f"An unexpected error occurred: {e}")
+            try:
+                AsyncResult(cover_letter_task_id).revoke()
+                AsyncResult(cover_letter_task_id).forget()
+            except:
+                pass
 
             return Response(
                 {
                     "status": "Failed",
-                    "message": "Please generate content again!",
+                    "message": "An unexpected error occurred. Please generate content again.",
+                    "task_id": cover_letter_task_id,
                 },
-                status=status.HTTP_400_BAD_REQUEST,
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
 
@@ -374,98 +473,256 @@ class UpdateGenerateAICoverLetterContentView(CreateAPIView):
 
 # view updated generated content
 class UpdatedGeneratedAICoverLetterContentView(APIView):
-    """Get a cover letter content"""
+    """Enhanced endpoint that checks task status and automatically updates cover letter when ready"""
+
+    permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request, cover_letter_content_id):
-        """"""
+        """
+        Enhanced endpoint that:
+        1. Checks the status of the async update task
+        2. If task is complete and successful, automatically updates the existing cover letter and returns it
+        3. If task is still pending/running, returns status information
+        4. If task failed, returns error information
+        """
         cover_letter_repo = Container.cover_letter_repository()
 
         try:
             cover_letter_content_result = AsyncResult(cover_letter_content_id)
 
+            # Handle failed tasks
             if (
                 cover_letter_content_result.state.lower() == "failure"
                 or cover_letter_content_result.failed()
             ):
-                return cover_letter_content_result.maybe_throw()
-
-            if cover_letter_content_result.ready():
-                cached_data = cover_letter_repo.get_task_result(
-                    cover_letter_content_result.id
+                logger.error(f"Update task {cover_letter_content_id} failed")
+                return Response(
+                    {
+                        "status": "Failed",
+                        "message": "Cover letter update failed. Please try again.",
+                        "task_id": cover_letter_content_id,
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
                 )
 
+            # Handle completed tasks
+            if cover_letter_content_result.ready():
+                cached_data = cover_letter_repo.get_task_result(cover_letter_content_result.id)
+
+                # If data is not cached but task is successful, cache it first
                 if (
                     cached_data is None
                     and cover_letter_content_result.status.lower() == "success"
                 ):
-
                     cover_letter_repo.save_task_result(
                         cover_letter_content_result.id,
                         cover_letter_content_result.result,
                     )
+                    cached_data = cover_letter_content_result.result
 
-                    logger.info(f"Cover letter content retreived successfully")
-                    return Response(
-                        {
-                            "status": cover_letter_content_result.status,
-                            "task_id": cover_letter_content_result.task_id,
-                            **cover_letter_repo.get_task_result(
-                                cover_letter_content_id
-                            ),
-                        },
-                        status=status.HTTP_200_OK,
-                    )
+                # If we have the task data, automatically update the cover letter
+                if cached_data and cover_letter_content_result.status.lower() == "success":
+                    try:
+                        cover_letter_id = cached_data.get("cover_letter_id")
+                        if not cover_letter_id:
+                            logger.error(f"No cover_letter_id found in task result for {cover_letter_content_id}")
+                            return Response(
+                                {
+                                    "status": "Failed",
+                                    "message": "Cover letter update completed but cover letter ID missing. Please try again.",
+                                    "task_id": cover_letter_content_id,
+                                },
+                                status=status.HTTP_400_BAD_REQUEST,
+                            )
 
-                logger.info(f"Cover letter content retreived successfully")
-                cover_letter_content_result.forget()
-                logger.info(f"Cover letter content tast result deleted successfully")
+                        # Update the existing cover letter automatically
+                        update_success = cover_letter_repo.update_cover_letter(
+                            cover_letter_id,
+                            cached_data["original_content"],
+                            cached_data["parsed_content"],
+                            self.request.user,
+                        )
 
+                        if update_success:
+                            # Get the updated cover letter to return
+                            try:
+                                updated_cover_letter = CoverLetter.objects.get(id=cover_letter_id, user=self.request.user)
+
+                                # Clean up the cached data and task result
+                                cover_letter_repo.delete_task(cover_letter_content_id)
+                                cover_letter_content_result.forget()
+
+                                logger.info(f"Cover letter updated successfully with ID: {updated_cover_letter.id}")
+
+                                # Return the updated cover letter data (same format as UpdateAICoverLetterView)
+                                return Response(
+                                    {
+                                        "status": "Success",
+                                        "message": "Cover letter updated successfully",
+                                        "cover_letter": {
+                                            "id": updated_cover_letter.id,
+                                            "name": updated_cover_letter.name,
+                                            "email": updated_cover_letter.email,
+                                            "phone_number": updated_cover_letter.phone_number,
+                                            "company_name": updated_cover_letter.company_name,
+                                            "job_title": updated_cover_letter.job_title,
+                                            "cover_letter_content": updated_cover_letter.cover_letter_content,
+                                            "generated_content": updated_cover_letter.generated_content,
+                                            "parsed_content": updated_cover_letter.parsed_content,
+                                        },
+                                        "task_id": cover_letter_content_id,
+                                    },
+                                    status=status.HTTP_200_OK,
+                                )
+                            except CoverLetter.DoesNotExist:
+                                logger.error(f"Cover letter with ID {cover_letter_id} not found for user {self.request.user.id}")
+                                return Response(
+                                    {
+                                        "status": "Failed",
+                                        "message": "Cover letter not found. Please ensure you have permission to update this cover letter.",
+                                        "task_id": cover_letter_content_id,
+                                    },
+                                    status=status.HTTP_404_NOT_FOUND,
+                                )
+                        else:
+                            logger.error(f"Failed to update cover letter with ID {cover_letter_id}")
+                            return Response(
+                                {
+                                    "status": "Failed",
+                                    "message": "Cover letter update completed but failed to save changes. Please try again.",
+                                    "task_id": cover_letter_content_id,
+                                },
+                                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            )
+                    except Exception as e:
+                        logger.error(f"Failed to update cover letter: {e}")
+                        return Response(
+                            {
+                                "status": "Failed",
+                                "message": "Cover letter update completed but failed to update cover letter. Please try again.",
+                                "task_id": cover_letter_content_id,
+                            },
+                            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        )
+
+                # If task completed but no valid data
+                logger.error(f"Update task {cover_letter_content_id} completed but no valid data found")
                 return Response(
                     {
-                        **cached_data,
+                        "status": "Failed",
+                        "message": "Cover letter update completed but no valid data found. Please try again.",
+                        "task_id": cover_letter_content_id,
                     },
-                    status=status.HTTP_200_OK,
+                    status=status.HTTP_400_BAD_REQUEST,
                 )
 
-            cached_data = cover_letter_repo.get_task_result(
-                cover_letter_content_result.id
-            )
+            # Handle pending tasks
+            cached_data = cover_letter_repo.get_task_result(cover_letter_content_result.id)
 
             if cached_data:
-                logger.info(f"Cover letter content retreived successfully")
-                return Response(
-                    {
-                        **cached_data,
-                    },
-                    status=status.HTTP_200_OK,
-                )
+                # Task is complete but AsyncResult might not reflect it yet
+                try:
+                    cover_letter_id = cached_data.get("cover_letter_id")
+                    if cover_letter_id:
+                        update_success = cover_letter_repo.update_cover_letter(
+                            cover_letter_id,
+                            cached_data["original_content"],
+                            cached_data["parsed_content"],
+                            self.request.user,
+                        )
 
-            logger.error("Content is pending or has been deleted")
+                        if update_success:
+                            updated_cover_letter = CoverLetter.objects.get(id=cover_letter_id, user=self.request.user)
 
-            print(cover_letter_content_result.state)
+                            # Clean up the cached data
+                            cover_letter_repo.delete_task(cover_letter_content_id)
+                            cover_letter_content_result.forget()
+
+                            logger.info(f"Cover letter updated successfully with ID: {updated_cover_letter.id}")
+
+                            return Response(
+                                {
+                                    "status": "Success",
+                                    "message": "Cover letter updated successfully",
+                                    "cover_letter": {
+                                        "id": updated_cover_letter.id,
+                                        "name": updated_cover_letter.name,
+                                        "email": updated_cover_letter.email,
+                                        "phone_number": updated_cover_letter.phone_number,
+                                        "company_name": updated_cover_letter.company_name,
+                                        "job_title": updated_cover_letter.job_title,
+                                        "cover_letter_content": updated_cover_letter.cover_letter_content,
+                                        "generated_content": updated_cover_letter.generated_content,
+                                        "parsed_content": updated_cover_letter.parsed_content,
+                                    },
+                                    "task_id": cover_letter_content_id,
+                                },
+                                status=status.HTTP_200_OK,
+                            )
+                except Exception as e:
+                    logger.error(f"Failed to update cover letter from cached data: {e}")
+                    return Response(
+                        {
+                            "status": "Failed",
+                            "message": "Cover letter update completed but failed to update cover letter. Please try again.",
+                            "task_id": cover_letter_content_id,
+                        },
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    )
+
+            # Task is still pending
+            logger.info(f"Update task {cover_letter_content_id} is still pending")
             return Response(
-                {"status": "PENDING OR DELETED"},
+                {
+                    "status": "Pending",
+                    "message": "Cover letter update is still in progress. Please check again in a few moments.",
+                    "task_id": cover_letter_content_id,
+                    "task_state": cover_letter_content_result.state,
+                },
                 status=status.HTTP_202_ACCEPTED,
             )
+
         except BackendError:  # Raised when result backend can't find the task
-            print(
-                f"Task result for {cover_letter_content_id} has been deleted or doesn't exist."
+            logger.error(
+                f"Update task result for {cover_letter_content_id} has been deleted or doesn't exist."
+            )
+            return Response(
+                {
+                    "status": "Failed",
+                    "message": "Task not found. Please generate content again.",
+                    "task_id": cover_letter_content_id,
+                },
+                status=status.HTTP_404_NOT_FOUND,
             )
         except KeyError:  # Raised if task metadata is missing in Redis
-            logger.error(f"Task {cover_letter_content_id} not found in the backend.")
-            cover_letter_content_result.forget()
+            logger.error(f"Update task {cover_letter_content_id} not found in the backend.")
+            try:
+                cover_letter_content_result.forget()
+            except:
+                pass
             return Response(
-                {"status": "Failed", "message": "Please generate content again."},
+                {
+                    "status": "Failed",
+                    "message": "Task metadata missing. Please generate content again.",
+                    "task_id": cover_letter_content_id,
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
         except Exception as e:  # Catch any unexpected errors
-            logger.error(f"An error occurred: {e}")
-            AsyncResult(cover_letter_content_id).revoke()
-            AsyncResult(cover_letter_content_id).forget()
+            logger.error(f"An unexpected error occurred during cover letter update: {e}")
+            try:
+                AsyncResult(cover_letter_content_id).revoke()
+                AsyncResult(cover_letter_content_id).forget()
+            except:
+                pass
 
             return Response(
-                {"status": "Failed", "message": "Please generate content again!"},
-                status=status.HTTP_400_BAD_REQUEST,
+                {
+                    "status": "Failed",
+                    "message": "An unexpected error occurred. Please generate content again.",
+                    "task_id": cover_letter_content_id,
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
 

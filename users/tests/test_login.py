@@ -17,8 +17,9 @@ class UserLoginTests(TestCase):
             first_name="Janet",
             last_name="Doe",
         )
+
         self.valid_credentials = {
-            "email": "janetdoe@example.com",
+            "username": "janetdoe",
             "password": "SecurePass123",
         }
 
@@ -27,11 +28,11 @@ class UserLoginTests(TestCase):
             self.login_url, self.valid_credentials, format="json"
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertIn("token", response.data)
+        self.assertIn("access", response.data)
 
-    def test_invalid_email(self):
+    def test_invalid_username(self):
         invalid_credentials = {
-            "email": "wrongemail@example.com",
+            "username": "johndoe",
             "password": "SecurePass123",
         }
         response = self.client.post(
@@ -41,7 +42,7 @@ class UserLoginTests(TestCase):
 
     def test_invalid_password(self):
         invalid_credentials = {
-            "email": "janetdoe@example.com",
+            "username": "janetdoe@example.com",
             "password": "WrongPass123",
         }
         response = self.client.post(
@@ -57,7 +58,7 @@ class UserLoginTests(TestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_missing_password(self):
-        invalid_credentials = {"email": "janetdoe@example.com"}
+        invalid_credentials = {"username": "janetdoe"}
         response = self.client.post(
             self.login_url, invalid_credentials, format="json"
         )

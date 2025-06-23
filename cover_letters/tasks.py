@@ -51,8 +51,8 @@ def update_cover_letter_content_task(cover_letter_id: str, user_data: dict, user
     cover_letter.update_generate_content_count += 1
     cover_letter.save(update_fields=["update_generate_content_count"])
 
-    return {"original_content": cover_letter_content, "parsed_content": parsed_data}
     return {
         "original_content": cover_letter_content,
         "parsed_content": parsed_data,
+        "cover_letter_id": cover_letter_id  # Include cover_letter_id for automatic update functionality
     }

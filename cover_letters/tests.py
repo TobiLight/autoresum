@@ -261,8 +261,6 @@ class OpenAICoverLetterGeneratorTest(TestCase):
             client, mock_client
         )  # Ensure the returned client is the mock
 
-    @patch("cover_letters.services.ai_generator.OpenAICoverLetterGenerator.init_openai")
-    def test_parse_cover_letter_content_content(self, mock_init_openai):
     @patch(
         "cover_letters.services.ai_generator.OpenAICoverLetterGenerator.init_openai"
     )
@@ -339,3 +337,173 @@ class OpenAICoverLetterGeneratorTest(TestCase):
 
         self.assertEqual(cover_letter_content, "Generated cover letter Content")
         mock_client.chat.completions.create.assert_called_once()
+
+
+class ViewGeneratedCoverLetterContentViewTest(TestCase):
+    """
+    Test the enhanced ViewGeneratedCoverLetterContentView
+    that automatically creates cover letters.
+    """
+
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(
+            username="testuser",
+            email="testuser@example.com",
+            password="testpass",
+        )
+        self.client.force_authenticate(user=self.user)
+        self.task_id = "test-cover-letter-task-id-123"
+
+    @patch("cover_letters.containers.Container.cover_letter_repository")
+    @patch("celery.result.AsyncResult")
+    def test_successful_task_creates_cover_letter_automatically(self, mock_async_result, mock_repo):
+        """Test that a successful task automatically creates a cover letter."""
+        # Mock AsyncResult for successful task
+        mock_result = MagicMock()
+        mock_result.state = "SUCCESS"
+        mock_result.status = "SUCCESS"
+        mock_result.ready.return_value = True
+        mock_result.failed.return_value = False
+        mock_result.id = self.task_id
+        mock_async_result.return_value = mock_result
+
+        # Mock repository methods
+        mock_repository = MagicMock()
+        mock_repo.return_value = mock_repository
+
+        # Mock task result data
+        task_data = {
+            "original_content": "Generated cover letter content",
+            "parsed_content": {
+                "name": "John Doe",
+                "email": "john.doe@example.com",
+                "phone": "+1234567890",
+                "company_name": "Tech Corp",
+                "job_title": "Software Engineer",
+                "cover_letter": "Dear Hiring Manager, I am writing to express my interest...",
+            }
+        }
+        mock_repository.get_task_result.return_value = task_data
+
+        # Mock created cover letter
+        mock_cover_letter = MagicMock()
+        mock_cover_letter.id = 1
+        mock_cover_letter.name = "John Doe"
+        mock_cover_letter.email = "john.doe@example.com"
+        mock_cover_letter.phone_number = "+1234567890"
+        mock_cover_letter.company_name = "Tech Corp"
+        mock_cover_letter.job_title = "Software Engineer"
+        mock_cover_letter.cover_letter_content = "Dear Hiring Manager, I am writing to express my interest..."
+        mock_cover_letter.generated_content = "Generated cover letter content"
+        mock_repository.create_cover_letter.return_value = mock_cover_letter
+
+        # Make request to the enhanced endpoint
+        response = self.client.get(f"/api/cover-letter/generated/{self.task_id}")
+
+        # Assertions
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["status"], "Success")
+        self.assertEqual(response.data["message"], "Cover letter created successfully")
+        self.assertIn("cover_letter", response.data)
+        self.assertEqual(response.data["cover_letter"]["id"], 1)
+        self.assertEqual(response.data["cover_letter"]["name"], "John Doe")
+        self.assertEqual(response.data["task_id"], self.task_id)
+
+        # Verify repository methods were called
+        mock_repository.create_cover_letter.assert_called_once_with(
+            task_data["original_content"],
+            task_data["parsed_content"],
+            self.user
+        )
+        mock_repository.delete_task.assert_called_once_with(self.task_id)
+
+    @patch("cover_letters.containers.Container.cover_letter_repository")
+    @patch("celery.result.AsyncResult")
+    def test_pending_task_returns_status(self, mock_async_result, mock_repo):
+        """Test that a pending task returns status information."""
+        # Mock AsyncResult for pending task
+        mock_result = MagicMock()
+        mock_result.state = "PENDING"
+        mock_result.ready.return_value = False
+        mock_result.failed.return_value = False
+        mock_result.id = self.task_id
+        mock_async_result.return_value = mock_result
+
+        # Mock repository methods
+        mock_repository = MagicMock()
+        mock_repo.return_value = mock_repository
+        mock_repository.get_task_result.return_value = None
+
+        # Make request to the enhanced endpoint
+        response = self.client.get(f"/api/cover-letter/generated/{self.task_id}")
+
+        # Assertions
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.data["status"], "Pending")
+        self.assertIn("Cover letter generation is still in progress", response.data["message"])
+        self.assertEqual(response.data["task_id"], self.task_id)
+        self.assertEqual(response.data["task_state"], "PENDING")
+
+    # @patch("cover_letters.containers.Container.cover_letter_repository")
+    # @patch("celery.result.AsyncResult")
+    # def test_failed_task_returns_error(self, mock_async_result, mock_repo):
+    #     """Test that a failed task returns error information."""
+    #     # Mock AsyncResult for failed task
+    #     mock_result = MagicMock()
+    #     mock_result.state = "FAILURE"
+    #     mock_result.failed.return_value = True
+    #     mock_result.id = self.task_id
+    #     mock_async_result.return_value = mock_result
+
+    #     # Make request to the enhanced endpoint
+    #     response = self.client.get(f"/api/cover-letter/generated/{self.task_id}")
+
+    #     # Assertions
+    #     self.assertEqual(response.status_code, 400)
+    #     self.assertEqual(response.data["status"], "Failed")
+        self.assertIn("Cover letter generation failed", response.data["message"])
+        self.assertEqual(response.data["task_id"], self.task_id)
+
+    @patch("cover_letters.containers.Container.cover_letter_repository")
+    @patch("celery.result.AsyncResult")
+    def test_cover_letter_creation_failure_handled(self, mock_async_result, mock_repo):
+        """Test that cover letter creation failures are handled gracefully."""
+        # Mock AsyncResult for successful task
+        mock_result = MagicMock()
+        mock_result.state = "SUCCESS"
+        mock_result.status = "SUCCESS"
+        mock_result.ready.return_value = True
+        mock_result.failed.return_value = False
+        mock_result.id = self.task_id
+        mock_async_result.return_value = mock_result
+
+        # Mock repository methods
+        mock_repository = MagicMock()
+        mock_repo.return_value = mock_repository
+
+        # Mock task result data
+        task_data = {
+            "original_content": "Generated cover letter content",
+            "parsed_content": {
+                "name": "John Doe",
+                "email": "john.doe@example.com",
+                "phone": "+1234567890",
+                "company_name": "Tech Corp",
+                "job_title": "Software Engineer",
+                "cover_letter": "Dear Hiring Manager, I am writing to express my interest...",
+            }
+        }
+        mock_repository.get_task_result.return_value = task_data
+
+        # Mock cover letter creation failure
+        mock_repository.create_cover_letter.side_effect = Exception("Database error")
+
+        # Make request to the enhanced endpoint
+        response = self.client.get(f"/api/cover-letter/generated/{self.task_id}")
+
+        # Assertions
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.data["status"], "Failed")
+        self.assertIn("failed to create cover letter", response.data["message"])
+        self.assertEqual(response.data["task_id"], self.task_id)
