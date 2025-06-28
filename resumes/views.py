@@ -159,7 +159,9 @@ class GeneratedAIContentView(APIView):
                         )
 
                 # If task completed but no valid data
-                logger.error(f"Task {resume_content_id} completed but no valid data found")
+                logger.error(
+                    f"Task {resume_content_id} completed but no valid data found"
+                )
                 return Response(
                     {
                         "status": "Failed",
@@ -301,9 +303,7 @@ class ResumeCreateView(CreateAPIView):
         if serializer.is_valid():
             repository = Container.resume_repository()
 
-            data = repository.get_task_result(
-                request.data.get("resume_task_id")
-            )
+            data = repository.get_task_result(request.data.get("resume_task_id"))
 
             if data:
                 resume = repository.create_resume(
@@ -336,9 +336,7 @@ class ResumeCreateView(CreateAPIView):
             headers = self.get_success_headers(serializer.data)
             logger.error(f"Resume creation failed: {serializer.errors}")
             return Response(
-                {
-                    "details": "Resume failed to create! Generate resume and try again"
-                },
+                {"details": "Resume failed to create! Generate resume and try again"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -406,11 +404,6 @@ class UpdateGenerateAIContentView(CreateAPIView):
                         {"detail": "Subscription not found."},
                         status=status.HTTP_403_FORBIDDEN,
                     )
-
-                # if not subscription.can_generate_resume():
-                #     return Response({
-                #         "detail": "Free tier limit reached. Upgrade to Pro for unlimited access."
-                #     }, status=status.HTTP_402_PAYMENT_REQUIRED)
 
                 if resume.update_generate_content_count >= 3:
                     return Response(
@@ -488,7 +481,9 @@ class UpdatedGeneratedAIContentView(APIView):
                     try:
                         resume_id = cached_data.get("resume_id")
                         if not resume_id:
-                            logger.error(f"No resume_id found in task result for {resume_content_id}")
+                            logger.error(
+                                f"No resume_id found in task result for {resume_content_id}"
+                            )
                             return Response(
                                 {
                                     "status": "Failed",
@@ -509,13 +504,17 @@ class UpdatedGeneratedAIContentView(APIView):
                         if update_success:
                             # Get the updated resume to return
                             try:
-                                updated_resume = Resume.objects.get(id=resume_id, user=self.request.user)
+                                updated_resume = Resume.objects.get(
+                                    id=resume_id, user=self.request.user
+                                )
 
                                 # Clean up the cached data and task result
                                 resume_repo.delete_task(resume_content_id)
                                 resume_content_result.forget()
 
-                                logger.info(f"Resume updated successfully with ID: {updated_resume.id}")
+                                logger.info(
+                                    f"Resume updated successfully with ID: {updated_resume.id}"
+                                )
 
                                 # Return the updated resume data (same format as UpdateAIResumeView)
                                 return Response(
@@ -540,7 +539,9 @@ class UpdatedGeneratedAIContentView(APIView):
                                     status=status.HTTP_200_OK,
                                 )
                             except Resume.DoesNotExist:
-                                logger.error(f"Resume with ID {resume_id} not found for user {self.request.user.id}")
+                                logger.error(
+                                    f"Resume with ID {resume_id} not found for user {self.request.user.id}"
+                                )
                                 return Response(
                                     {
                                         "status": "Failed",
@@ -571,7 +572,9 @@ class UpdatedGeneratedAIContentView(APIView):
                         )
 
                 # If task completed but no valid data
-                logger.error(f"Update task {resume_content_id} completed but no valid data found")
+                logger.error(
+                    f"Update task {resume_content_id} completed but no valid data found"
+                )
                 return Response(
                     {
                         "status": "Failed",
@@ -597,13 +600,17 @@ class UpdatedGeneratedAIContentView(APIView):
                         )
 
                         if update_success:
-                            updated_resume = Resume.objects.get(id=resume_id, user=self.request.user)
+                            updated_resume = Resume.objects.get(
+                                id=resume_id, user=self.request.user
+                            )
 
                             # Clean up the cached data
                             resume_repo.delete_task(resume_content_id)
                             resume_content_result.forget()
 
-                            logger.info(f"Resume updated successfully with ID: {updated_resume.id}")
+                            logger.info(
+                                f"Resume updated successfully with ID: {updated_resume.id}"
+                            )
 
                             return Response(
                                 {
@@ -764,9 +771,7 @@ class ResumeResultView(APIView):
             serializer = ResumeSerializer(resume)
             return Response({"resume": serializer.data}, status=status.HTTP_200_OK)
         except Exception as e:
-            return Response(
-                {"resume": serializer.data}, status=status.HTTP_200_OK
-            )
+            return Response({"resume": serializer.data}, status=status.HTTP_200_OK)
         except Exception:
             return Response(
                 {"error": "Resume not found"}, status=status.HTTP_404_NOT_FOUND

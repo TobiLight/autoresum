@@ -1,0 +1,47 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0  # Use the ref you want to point at
+    hooks:
+    - id: check-yaml
+    - id: check-json
+    - id: check-merge-conflict
+    - id: check-xml
+    - id: mixed-line-ending
+      files: '\.py$'
+    - id: debug-statements
+      files: '\.py$'
+    - id: trailing-whitespace
+      files: '\.py$'
+    - id: end-of-file-fixer
+      files: '\.py$'
+  - repo: https://github.com/asottile/pyupgrade
+    rev: v3.17.0
+    hooks:
+    - id: pyupgrade
+      args: [ "--py39-plus" ]
+      files: '\.py$'
+  - repo: https://github.com/psf/black
+    rev: 24.8.0
+    hooks:
+    - id: black
+      files: '\.py$'
+      language_version: python3.13
+      args: [
+        "--target-version", "py313",
+        "--line-length", "80"
+      ]
+  - repo: https://github.com/pycqa/isort
+    rev: 5.13.2
+    hooks:
+    - id: isort
+      args: ["--profile", "black", --line-length=80]
+      name: isort (python)
+      files: '\.py$'
+  - repo: https://github.com/PyCQA/flake8
+    rev: 7.1.1
+    hooks:
+    - id: flake8
+      files: '\.py$'
+      additional_dependencies:
+        - flake8-print
+        - flake8-string-format

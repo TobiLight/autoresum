@@ -34,18 +34,7 @@ class UserSerializer(serializers.HyperlinkedModelSerializer):
             raise serializers.ValidationError(
                 {"confirm_password": "Passwords do not match."}
             )
-        
-        # if len(data["password"]) < 8:
-        #     raise ValidationError("Password must be at least 8 characters long.")
-        # if not re.findall('\d', data["password"]):
-        #     raise ValidationError("Password must contain at least one digit.")
-        # if not re.findall('[A-Z]', data["password"]):
-        #     raise ValidationError("Password must contain at least one uppercase letter.")
-        # if not re.findall('[a-z]', data["password"]):
-        #     raise ValidationError("Password must contain at least one lowercase letter.")
-        # if not re.findall('[^A-Za-z0-9]', data["password"]):
-        #     raise ValidationError("Password must contain at least one special character.")
-        
+
         return data
 
     def validate_password(self, value):

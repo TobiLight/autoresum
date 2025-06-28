@@ -5,16 +5,15 @@
 
 import psycopg2
 from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
-from os import getenv
 
 PG_SUPERUSER = "postgres"
 PG_SUPERPASS = "postgres"
 PG_HOST = "localhost"
 PG_PORT = 5432
 
-NEW_DB = getenv("DB", "autoresume_db")
-NEW_USER = getenv("DB_USER", "autoresum_admin")
-NEW_PASS = getenv("DB_PASSWORD", "password")
+NEW_DB = "autoresume_db"
+NEW_USER = "autoresum_admin"
+NEW_PASS = "admin123."
 
 def create_db_and_user():
     conn = psycopg2.connect(

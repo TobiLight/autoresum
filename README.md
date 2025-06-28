@@ -5,7 +5,6 @@
 1. Install python3.13 locally
 2. Create venv `python3 -m venv venv`
 3. Activate the venv `source venv/bin/activate`
-4. Run the app `python3 manage.py runserver`
 
 ### To check Django version
 
